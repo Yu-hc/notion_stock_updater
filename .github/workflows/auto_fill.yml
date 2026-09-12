@@ -28,4 +28,4 @@ jobs:
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           DATABASE_ID: ${{ secrets.DATABASE_ID }}
-        run: python test_connection.py
+        run: python auto_fill_stocks.py
