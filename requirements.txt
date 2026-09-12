@@ -1,0 +1,4 @@
+twstock>=1.5.1
+requests
+python-dotenv
+lxml>=6.0.0
