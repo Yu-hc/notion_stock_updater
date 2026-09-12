@@ -1,61 +1,29 @@
 import os
-import sys
-import time
 import requests
-import twstock
 from dotenv import load_dotenv
-
+import twstock
 load_dotenv()  # Load environment variables from .env file
 
-# Environment variables
+# Set your credentials (or load from environment variables)
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
 DATABASE_ID = os.getenv("DATABASE_ID")
 
-NOTION_VERSION = "2022-06-28"
 HEADERS = {
     "Authorization": f"Bearer {NOTION_TOKEN}",
     "Content-Type": "application/json",
-    "Notion-Version": NOTION_VERSION,
+    "Notion-Version": "2022-06-28",
 }
+def update_twstock_directory():
+    """Update the local Taiwan stock directory using twstock."""
+    print("Updating Taiwan stock directory...")
+    twstock.__update_codes()
+    print("Taiwan stock directory updated.")
+    # print(twstock.codes.get("8027"))
 
 
-def find_unpopulated_stocks():
-    """Query Notion for records where Ticker exists, but Stock or Sector is empty."""
-    url = f"https://api.notion.com/v1/databases/{DATABASE_ID}/query"
-
-    # Filter: (Stock is empty) OR (Sector is empty)
-    payload = {
-        "filter": {
-            "or": [
-                {"property": "Stock", "title": {"is_empty": True}},
-                {"property": "Sector", "multi_select": {"is_empty": True}},
-            ]
-        }
-    }
-
-    try:
-        response = requests.post(url, json=payload, headers=HEADERS)
-        response.raise_for_status()
-        return response.json().get("results", [])
-    except requests.exceptions.RequestException as exc:
-        print(f"[ERROR] Failed to query Notion database: {exc}")
-        if response is not None:
-            print(f"Response: {response.text}")
-        return []
-
-
-def update_notion_page(page_id, stock_name, sector_names):
-    """Write stock name and sector list back to the Notion page, replacing existing values."""
+def overwrite_stock_and_sector(page_id, stock_name, sector_name):
+    """Replace the current Stock and Sector values on a Notion page."""
     url = f"https://api.notion.com/v1/pages/{page_id}"
-
-    if isinstance(sector_names, str):
-        sector_names = [sector_names]
-
-    cleaned_sector_names = [
-        sector_name.strip()
-        for sector_name in sector_names
-        if sector_name and sector_name.strip()
-    ]
 
     payload = {
         "properties": {
@@ -63,64 +31,88 @@ def update_notion_page(page_id, stock_name, sector_names):
                 "title": [{"text": {"content": stock_name}}]
             },
             "Sector": {
-                "multi_select": [{"name": sector_name} for sector_name in cleaned_sector_names]
+                "multi_select": [{"name": sector_name}] if sector_name else []
             },
         }
     }
 
-    try:
-        resp = requests.patch(url, json=payload, headers=HEADERS)
-        resp.raise_for_status()
-        print(f"[SUCCESS] Updated {stock_name} ({', '.join(cleaned_sector_names) if cleaned_sector_names else 'no sector'})")
-    except requests.exceptions.RequestException as exc:
-        print(f"[ERROR] Failed to update page {page_id}: {exc}")
+    response = requests.patch(url, json=payload, headers=HEADERS)
+
+    if response.status_code not in (200, 201):
+        print(f"❌ Failed to update page {page_id}: {response.status_code} - {response.text}")
+        return False
+
+    # print(f"✅ Updated {page_id}: Stock='{stock_name}', Sector='{sector_name}'")
+    return True
 
 
-def main():
-    if not NOTION_TOKEN or not DATABASE_ID:
-        print("[CRITICAL] Missing NOTION_TOKEN or DATABASE_ID in environment.")
-        sys.exit(1)
+def check_connection_and_dump_all():
+    url = f"https://api.notion.com/v1/databases/{DATABASE_ID}/query"
 
-    # print("Fetching updated Taiwan stock directory...")
-    # twstock.__update_codes()
-    
-    print("Checking Notion database for new stock entries...")
-    pending_pages = find_unpopulated_stocks()
+    all_pages = []
+    has_more = True
+    start_cursor = None
 
-    if not pending_pages:
-        print("All stock rows are up-to-date. No action needed.")
-        return
+    print("Connecting to Notion database...")
 
-    print(f"Found {len(pending_pages)} row(s) to process.")
+    # Handles pagination in case your database has more than 100 entries
+    while has_more:
+        payload = {"page_size": 100}
+        if start_cursor:
+            payload["start_cursor"] = start_cursor
 
-    for page in pending_pages:
+        response = requests.post(url, json=payload, headers=HEADERS)
+
+        if response.status_code == 401:
+            print("❌ Authentication Failed: Invalid NOTION_TOKEN.")
+            return
+        elif response.status_code == 404:
+            print("❌ Not Found: Double check DATABASE_ID, and make sure the connection is added via 'Connect to' on the database.")
+            return
+        elif response.status_code != 200:
+            print(f"❌ Error {response.status_code}: {response.text}")
+            return
+
+        data = response.json()
+        results = data.get("results", [])
+        all_pages.extend(results)
+
+        has_more = data.get("has_more", False)
+        start_cursor = data.get("next_cursor")
+
+    print(f"\n✅ Connection Successful! Found {len(all_pages)} total items in the database.\n")
+    print("-" * 50)
+
+    # Print out summary of each entry and replace the original Stock/Sector values
+    for idx, page in enumerate(all_pages, start=1):
         page_id = page["id"]
+        properties = page.get("properties", {})
 
-        # Extract the Ticker from the Title property
-        title_field = page.get("properties", {}).get("Ticker", {}).get("title", [])
-        print(f"[DEBUG] Processing page {page_id} with Ticker: {title_field}")
-        continue
-        if not title_field:
-            print(f"[SKIP] Page {page_id} has no Ticker entered.")
-            continue
+        ticker = properties.get("Ticker", {}).get("number")
+        prop = properties.get("Stock", {}).get("title", [])
+        current_stock_name = prop[0]["plain_text"] if prop else ""
 
-        raw_ticker = title_field[0].get("text", {}).get("content", "").strip()
+        sector_values = properties.get("Sector", {}).get("multi_select", [])
+        current_sector_names = [item["name"] for item in sector_values]
+        print(f"[{idx}] Page ID: {page_id} | Ticker: {ticker}")
+        print(f"    Current Stock: {current_stock_name}")
+        print(f"    Current Sector: {current_sector_names}")
 
-        # Check stock existence in twstock
-        stock_data = twstock.codes.get(raw_ticker)
-        if not stock_data:
-            print(f"[WARN] Ticker '{raw_ticker}' not recognized by twstock. Skipping.")
-            continue
+        tw_stock_raw = twstock.codes.get(str(ticker))
+        tw_stock_name = tw_stock_raw.name if tw_stock_raw else "N/A"
+        tw_stock_sector = tw_stock_raw.group if tw_stock_raw else "N/A"
+        tw_stock_market = tw_stock_raw.market if tw_stock_raw else "N/A"
 
-        stock_name = stock_data.name
-        industry = stock_data.group or "其他"
+        combined_name = f"{tw_stock_name} ({ticker})" if tw_stock_name and ticker is not None else "N/A"
 
-        print(f"Processing '{raw_ticker}': {stock_name} | {industry}")
-        update_notion_page(page_id, stock_name, industry)
+        print(f"    twstock Name: {tw_stock_name}")
+        print(f"    twstock Sector: {tw_stock_sector}")
+        print(f"    twstock Market: {tw_stock_market}")
+        print(f"    Combined Name: {combined_name}")
 
-        # Rate limiting: sleep briefly between updates
-        time.sleep(0.4)
+        overwrite_stock_and_sector(page_id, combined_name, tw_stock_sector)
 
 
 if __name__ == "__main__":
-    main()
+    update_twstock_directory()
+    check_connection_and_dump_all()
