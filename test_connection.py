@@ -21,9 +21,34 @@ def update_twstock_directory():
     # print(twstock.codes.get("8027"))
 
 
+def overwrite_stock_and_sector(page_id, stock_name, sector_name):
+    """Replace the current Stock and Sector values on a Notion page."""
+    url = f"https://api.notion.com/v1/pages/{page_id}"
+
+    payload = {
+        "properties": {
+            "Stock": {
+                "title": [{"text": {"content": stock_name}}]
+            },
+            "Sector": {
+                "multi_select": [{"name": sector_name}] if sector_name else []
+            },
+        }
+    }
+
+    response = requests.patch(url, json=payload, headers=HEADERS)
+
+    if response.status_code not in (200, 201):
+        print(f"❌ Failed to update page {page_id}: {response.status_code} - {response.text}")
+        return False
+
+    # print(f"✅ Updated {page_id}: Stock='{stock_name}', Sector='{sector_name}'")
+    return True
+
+
 def check_connection_and_dump_all():
     url = f"https://api.notion.com/v1/databases/{DATABASE_ID}/query"
-    
+
     all_pages = []
     has_more = True
     start_cursor = None
@@ -58,30 +83,35 @@ def check_connection_and_dump_all():
     print(f"\n✅ Connection Successful! Found {len(all_pages)} total items in the database.\n")
     print("-" * 50)
 
-    # Print out summary of each entry
+    # Print out summary of each entry and replace the original Stock/Sector values
     for idx, page in enumerate(all_pages, start=1):
         page_id = page["id"]
         properties = page.get("properties", {})
-        
-        # Extract title/ticker property (assuming the title property is named 'Ticker')
-        ticker = properties.get("Ticker", {}).get("number", {})
-        print(f"[{idx}] Page ID: {page_id} | Ticker: {ticker}")
+
+        ticker = properties.get("Ticker", {}).get("number")
         prop = properties.get("Stock", {}).get("title", [])
-        stock_name = prop[0]["plain_text"] if prop else ""
-        print(f"    Stock Name: {stock_name}")
+        current_stock_name = prop[0]["plain_text"] if prop else ""
+
         sector_values = properties.get("Sector", {}).get("multi_select", [])
-        sector_names = [item["name"] for item in sector_values]
-        print(f"Sector: {sector_names}")
+        current_sector_names = [item["name"] for item in sector_values]
+        print(f"[{idx}] Page ID: {page_id} | Ticker: {ticker}")
+        print(f"    Current Stock: {current_stock_name}")
+        print(f"    Current Sector: {current_sector_names}")
+
         tw_stock_raw = twstock.codes.get(str(ticker))
         tw_stock_name = tw_stock_raw.name if tw_stock_raw else "N/A"
-        print(f"    twstock Name: {tw_stock_name}")
         tw_stock_sector = tw_stock_raw.group if tw_stock_raw else "N/A"
-        print(f"    twstock Sector: {tw_stock_sector}")
         tw_stock_market = tw_stock_raw.market if tw_stock_raw else "N/A"
+
+        combined_name = f"{tw_stock_name} ({ticker})" if tw_stock_name and ticker is not None else "N/A"
+
+        print(f"    twstock Name: {tw_stock_name}")
+        print(f"    twstock Sector: {tw_stock_sector}")
         print(f"    twstock Market: {tw_stock_market}")
-        combined_name = f"{tw_stock_name} ({ticker})" if tw_stock_name and ticker else "N/A"
         print(f"    Combined Name: {combined_name}")
-        # print(f"[{idx}] Page ID: {page_id} | Ticker: {ticker_val}")
+
+        overwrite_stock_and_sector(page_id, combined_name, tw_stock_sector)
+
 
 if __name__ == "__main__":
     update_twstock_directory()
