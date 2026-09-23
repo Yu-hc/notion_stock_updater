@@ -1,9 +1,6 @@
 name: Auto-fill Stock Info
 
 on:
-  schedule:
-    # Runs every 60 minutes (UTC)
-    - cron: '*/60 * * * *'
   workflow_dispatch: # Allows manual trigger from the GitHub UI anytime
   repository_dispatch:
     types: [notion_trigger]
