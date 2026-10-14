@@ -6,7 +6,7 @@ load_dotenv()  # Load environment variables from .env file
 
 # Set your credentials (or load from environment variables)
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
-DATABASE_ID = os.getenv("DATABASE_ID")
+STOCK_DATABASE_ID = os.getenv("STOCK_DATABASE_ID").replace("-", "")
 
 HEADERS = {
     "Authorization": f"Bearer {NOTION_TOKEN}",
@@ -47,7 +47,7 @@ def overwrite_stock_and_sector(page_id, stock_name, sector_name):
 
 
 def check_connection_and_dump_all():
-    url = f"https://api.notion.com/v1/databases/{DATABASE_ID}/query"
+    url = f"https://api.notion.com/v1/databases/{STOCK_DATABASE_ID}/query"
 
     all_pages = []
     has_more = True
