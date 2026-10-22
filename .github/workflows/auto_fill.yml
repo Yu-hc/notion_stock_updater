@@ -26,5 +26,5 @@ jobs:
       - name: Execute script
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
-          DATABASE_ID: ${{ secrets.DATABASE_ID }}
+          STOCK_DATABASE_ID: ${{ secrets.STOCK_DATABASE_ID }}
         run: python auto_fill_stocks.py
